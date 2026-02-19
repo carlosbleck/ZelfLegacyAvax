@@ -1,0 +1,29 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@lit-protocol/auth": "^8.2.3",
+    "@lit-protocol/auth-helpers": "^7.4.0",
+    "@lit-protocol/constants": "^7.4.0",
+    "@lit-protocol/lit-client": "^8.3.1",
+    "@lit-protocol/lit-node-client": "^7.4.0",
+    "@lit-protocol/networks": "^8.4.1",
+    "axios": "^1.13.5",
+    "big-integer": "^1.6.52",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "ethers": "^6.16.0",
+    "express": "^5.2.1",
+    "form-data": "^4.0.5",
+    "viem": "^2.46.2"
+  }
+}
