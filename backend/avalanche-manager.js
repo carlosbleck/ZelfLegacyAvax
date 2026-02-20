@@ -248,43 +248,23 @@ class AvalancheManager {
         }
     }
 
-    /**
-     * Fund a wallet with gas from the relayer if its balance is too low.
-     * This is needed because lawyer wallets derived from mnemonics typically have no gas.
-     */
-    async fundWalletIfNeeded(walletAddress, minBalance = ethers.parseEther('0.01')) {
-        const balance = await this.provider.getBalance(walletAddress);
-        if (balance < minBalance) {
-            const fundAmount = ethers.parseEther('0.05');
-            console.log(`💰 Funding ${walletAddress} with 0.05 AVAX for gas (current balance: ${ethers.formatEther(balance)})`);
-            const tx = await this.relayerWallet.sendTransaction({
-                to: walletAddress,
-                value: fundAmount
-            });
-            await tx.wait();
-            console.log(`✅ Funded ${walletAddress} in tx ${tx.hash}`);
-        } else {
-            console.log(`💰 ${walletAddress} already has sufficient balance: ${ethers.formatEther(balance)}`);
-        }
-    }
+
 
     /**
      * Accept a vault (Lawyer only)
-     * Contract requires msg.sender == vault.lawyer, so the lawyer must sign directly.
-     * The relayer funds the lawyer wallet with gas before the transaction.
+     * Backend verifies the mnemonic actually belongs to the vault's lawyer before relaying.
      */
     async acceptVault(lawyerMnemonic, vaultId) {
         try {
             const lawyerAddress = this.getAddressFromMnemonic(lawyerMnemonic);
             console.log(`⚖️ Accepting vault ${vaultId} as lawyer ${lawyerAddress}`);
 
-            // Fund the lawyer wallet from relayer so it can pay gas
-            await this.fundWalletIfNeeded(lawyerAddress);
+            const vault = await this.contract.getVault(vaultId);
+            if (vault.lawyer.toLowerCase() !== lawyerAddress.toLowerCase()) {
+                throw new Error("Unauthorized: Mnemonic does not match vault lawyer");
+            }
 
-            const lawyerWallet = new ethers.Wallet(ethers.Wallet.fromPhrase(lawyerMnemonic).privateKey, this.provider);
-            const contractWithLawyer = this.contract.connect(lawyerWallet);
-
-            const tx = await contractWithLawyer.acceptVault(vaultId);
+            const tx = await this.contract.acceptVault(vaultId);
             const receipt = await tx.wait();
 
             return {
@@ -300,19 +280,19 @@ class AvalancheManager {
 
     /**
      * Reject a vault (Lawyer only)
+     * Backend verifies the mnemonic actually belongs to the vault's lawyer before relaying.
      */
     async rejectVault(lawyerMnemonic, vaultId) {
         try {
             const lawyerAddress = this.getAddressFromMnemonic(lawyerMnemonic);
             console.log(`⚖️ Rejecting vault ${vaultId} as lawyer ${lawyerAddress}`);
 
-            // Fund the lawyer wallet from relayer so it can pay gas
-            await this.fundWalletIfNeeded(lawyerAddress);
+            const vault = await this.contract.getVault(vaultId);
+            if (vault.lawyer.toLowerCase() !== lawyerAddress.toLowerCase()) {
+                throw new Error("Unauthorized: Mnemonic does not match vault lawyer");
+            }
 
-            const lawyerWallet = new ethers.Wallet(ethers.Wallet.fromPhrase(lawyerMnemonic).privateKey, this.provider);
-            const contractWithLawyer = this.contract.connect(lawyerWallet);
-
-            const tx = await contractWithLawyer.rejectVault(vaultId);
+            const tx = await this.contract.rejectVault(vaultId);
             const receipt = await tx.wait();
 
             return {
@@ -328,20 +308,19 @@ class AvalancheManager {
 
     /**
      * Confirm death (Lawyer only)
-     * Contract requires msg.sender == vault.lawyer.
+     * Backend verifies the mnemonic actually belongs to the vault's lawyer before relaying.
      */
     async confirmDeath(lawyerMnemonic, vaultId) {
         try {
             const lawyerAddress = this.getAddressFromMnemonic(lawyerMnemonic);
             console.log(`⚰️ Confirming death for vault ${vaultId} as lawyer ${lawyerAddress}`);
 
-            // Fund the lawyer wallet from relayer so it can pay gas
-            await this.fundWalletIfNeeded(lawyerAddress);
+            const vault = await this.contract.getVault(vaultId);
+            if (vault.lawyer.toLowerCase() !== lawyerAddress.toLowerCase()) {
+                throw new Error("Unauthorized: Mnemonic does not match vault lawyer");
+            }
 
-            const lawyerWallet = new ethers.Wallet(ethers.Wallet.fromPhrase(lawyerMnemonic).privateKey, this.provider);
-            const contractWithLawyer = this.contract.connect(lawyerWallet);
-
-            const tx = await contractWithLawyer.confirmDeath(vaultId);
+            const tx = await this.contract.confirmDeath(vaultId);
             const receipt = await tx.wait();
 
             return {
@@ -356,13 +335,18 @@ class AvalancheManager {
     }
     /**
      * Execute a vault on-chain (mark as Executed).
-     * Any caller is allowed by the contract as long as isClaimable is true.
-     * Uses the relayer to pay gas fees.
+     * Any caller is allowed by the contract (relayer pays gas), but backend guarantees
+     * the mnemonic signature corresponds to an authorized beneficiary.
      */
     async executeVault(beneficiaryMnemonic, vaultId) {
         try {
             const beneficiaryAddress = this.getAddressFromMnemonic(beneficiaryMnemonic);
             console.log(`✅ Executing vault ${vaultId} on behalf of beneficiary ${beneficiaryAddress}`);
+
+            const isBen = await this.contract.isBeneficiary(vaultId, beneficiaryAddress);
+            if (!isBen) {
+                throw new Error("Unauthorized: Mnemonic does not belong to a beneficiary of this vault");
+            }
 
             // Use the relayer to execute (saves beneficiary from needing gas)
             const tx = await this.contract.executeVault(vaultId);

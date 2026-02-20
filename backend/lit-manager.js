@@ -34,6 +34,7 @@ class LitManager {
         this.litClient = null;
         this.chain = 'fuji'; // Avalanche Fuji testnet
         this.privateKey = privateKey;
+        this.relayerAddress = new ethers.Wallet(privateKey).address.toLowerCase();
     }
 
     /**
@@ -85,6 +86,19 @@ class LitManager {
                     value: 'true',
                 },
             },
+            { operator: "and" },
+            {
+                conditionType: "evmBasic",
+                contractAddress: "",
+                standardContractType: "",
+                chain: this.chain,
+                method: "",
+                parameters: [":userAddress"],
+                returnValueTest: {
+                    comparator: "=",
+                    value: this.relayerAddress
+                }
+            }
         ];
 
         const encrypted = await this.litClient.encrypt({
@@ -130,6 +144,19 @@ class LitManager {
                     value: 'true',
                 },
             },
+            { operator: "and" },
+            {
+                conditionType: "evmBasic",
+                contractAddress: "",
+                standardContractType: "",
+                chain: this.chain,
+                method: "",
+                parameters: [":userAddress"],
+                returnValueTest: {
+                    comparator: "=",
+                    value: this.relayerAddress
+                }
+            }
         ];
 
         // Generate a fresh Ed25519 session keypair for this request

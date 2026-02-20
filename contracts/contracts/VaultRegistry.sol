@@ -270,7 +270,7 @@ contract VaultRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         if (!vault.exists) {
             return false;
         }
-        if (vault.state == VaultState.Claimable) {
+        if (vault.state == VaultState.Claimable || vault.state == VaultState.Executed) {
             return true;
         }
         if (vault.state == VaultState.PendingLawyer) {
@@ -291,11 +291,31 @@ contract VaultRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         Vault storage vault = vaults[_vaultId];
         require(vault.exists, "Vault does not exist");
         require(this.isClaimable(_vaultId), "Vault is not claimable yet");
-        require(vault.state == VaultState.Active || vault.state == VaultState.Warning, "Invalid state for execution");
+        require(
+            vault.state == VaultState.Active || 
+            vault.state == VaultState.Warning ||
+            vault.state == VaultState.Claimable, 
+            "Invalid state for execution"
+        );
+
+        require(isBeneficiary(_vaultId, msg.sender) || msg.sender == relayer, "Only beneficiary or relayer can execute");
 
         vault.state = VaultState.Executed;
         
         emit VaultExecuted(_vaultId, msg.sender);
+    }
+
+    /**
+     * @dev Check if a user is a beneficiary of a vault.
+     */
+    function isBeneficiary(bytes32 _vaultId, address _user) public view returns (bool) {
+        Vault storage vault = vaults[_vaultId];
+        for (uint256 i = 0; i < vault.beneficiaries.length; i++) {
+            if (vault.beneficiaries[i] == _user) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

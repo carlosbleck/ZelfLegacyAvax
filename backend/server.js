@@ -60,17 +60,19 @@ app.post('/api/vault/encrypt-shares', async (req, res) => {
 
         console.log(`📦 Encrypting shares for vault: ${vaultId}`);
 
+        const officialContractAddress = process.env.VAULT_REGISTRY_ADDRESS;
+
         // Encrypt both shares with Lit Protocol (access gated by VaultRegistry.isClaimable)
         const encryptedParty = await litManager.encryptPasswordShare(
             passwordparty,
             vaultId,
-            contractAddress
+            officialContractAddress
         );
 
         const encryptedLawyer = await litManager.encryptPasswordShare(
             passwordlawyer,
             vaultId,
-            contractAddress
+            officialContractAddress
         );
 
         // Upload encrypted shares to IPFS
@@ -144,6 +146,33 @@ app.post('/api/vault/decrypt-share', async (req, res) => {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
+        // 1. Verify EIP-191 Signature
+        const { ethers } = require('ethers');
+        let recoveredAddress;
+        try {
+            recoveredAddress = ethers.verifyMessage(authSig.signedMessage, authSig.sig);
+        } catch (e) {
+            return res.status(401).json({ error: 'Invalid signature format' });
+        }
+
+        if (recoveredAddress.toLowerCase() !== authSig.address.toLowerCase()) {
+            return res.status(401).json({ error: 'Signature address mismatch' });
+        }
+
+        // 1.1 Verify Signed Message content to avoid reuse
+        if (authSig.signedMessage !== 'Lit Protocol Access') {
+            return res.status(401).json({ error: 'Invalid signed message content' });
+        }
+
+        // 2. Force use of the official contract address from environment
+        const officialContractAddress = process.env.VAULT_REGISTRY_ADDRESS;
+
+        // Verify caller is a beneficiary of this vault on-chain
+        const isBen = await avalancheManager.contract.isBeneficiary(vaultId, recoveredAddress);
+        if (!isBen) {
+            return res.status(403).json({ error: 'Caller is not an authorized beneficiary' });
+        }
+
         console.log(`🔓 Decrypting share from IPFS: ${cid}`);
 
         // Retrieve encrypted share from IPFS
@@ -154,7 +183,7 @@ app.post('/api/vault/decrypt-share', async (req, res) => {
             encryptedData.ciphertext,
             encryptedData.dataToEncryptHash,
             vaultId,
-            contractAddress
+            officialContractAddress
         );
 
         console.log(`✅ Share decrypted successfully`);
@@ -365,11 +394,11 @@ app.post('/api/avalanche/change-lawyer', async (req, res) => {
 app.post('/api/avalanche/confirm-death', async (req, res) => {
     try {
         // Accept both field names for compatibility
-        const lawyerMnemonic = req.body.lawyerMnemonic || req.body.lawyerMnemonic;
+        const lawyerMnemonic = req.body.lawyerMnemonic || req.body.mnemonic;
         const { vaultId } = req.body;
 
         if (!lawyerMnemonic || !vaultId) {
-            return res.status(400).json({ error: 'Missing lawyerMnemonic or vaultId' });
+            return res.status(400).json({ error: 'Missing lawyerMnemonic/mnemonic or vaultId' });
         }
 
         console.log(`⚰️ Confirming death for vault: ${vaultId}`);
