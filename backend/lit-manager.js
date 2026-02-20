@@ -32,7 +32,7 @@ const NETWORK_MAP = {
 class LitManager {
     constructor(privateKey) {
         this.litClient = null;
-        this.chain = 'avalanche'; // Avalanche C-Chain
+        this.chain = 'fuji'; // Avalanche Fuji testnet
         this.privateKey = privateKey;
     }
 
@@ -44,8 +44,8 @@ class LitManager {
             return;
         }
 
-        const networkKey = process.env.LIT_NETWORK || 'nagaDev';
-        const network = NETWORK_MAP[networkKey] || nagaDev;
+        const networkKey = 'nagaDev'; // Force to central dev network which avoids requirement of capacity credits
+        const network = NETWORK_MAP[networkKey];
 
         console.log(`🔗 Connecting to Lit Protocol network: ${networkKey}`);
 
@@ -196,7 +196,7 @@ class LitManager {
             chain: this.chain,
         });
 
-        return decrypted;
+        return Buffer.from(decrypted.decryptedData).toString('utf-8');
     }
 
     /**

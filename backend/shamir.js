@@ -107,7 +107,7 @@ class ShamirSecretSharing {
     /**
      * Generate a random password
      */
-    static generateRandomPassword(length = 32) {
+    generateRandomPassword(length = 32) {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
         let password = '';
         const randomBytes = crypto.randomBytes(length);

@@ -27,5 +27,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "deploy:local": "hardhat run scripts/deploy.js --network localhost"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "@openzeppelin/contracts-upgradeable": "^5.4.0",
+    "@openzeppelin/hardhat-upgrades": "^3.9.1"
   }
 }

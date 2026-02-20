@@ -10,21 +10,9 @@ class AvalancheManager {
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
         this.contractAddress = contractAddress;
 
-        // VaultRegistry ABI (matches the updated contract with address _owner)
-        this.contractABI = [
-            'function createVault(address _owner, bytes32 vaultId, address[] memory beneficiaries, address lawyer, uint256 threshold, uint256 heartbeatInterval, string memory ipfsCid, string memory ipfsCidValidator) external',
-            'function updateHeartbeat(bytes32 vaultId) external',
-            'function cancelVault(bytes32 vaultId) external',
-            'function confirmDeath(bytes32 vaultId) external',
-            'function acceptVault(bytes32 _vaultId) external',
-            'function rejectVault(bytes32 _vaultId) external',
-            'function getVault(bytes32 vaultId) external view returns (tuple(bytes32 vaultId, address owner, address[] beneficiaries, address lawyer, uint256 threshold, uint256 heartbeatInterval, uint256 lastPing, uint256 createdAt, uint256 activationDate, string ipfsCid, string ipfsCidValidator, bool exists, uint8 state))',
-            'function isClaimable(bytes32 vaultId) external view returns (bool)',
-            'function relayer() external view returns (address)',
-            'function getBeneficiaryVaults(address _beneficiary) external view returns (bytes32[] memory)',
-            'function getLawyerVaults(address _lawyer) external view returns (bytes32[] memory)',
-            'function getUserVaults(address _owner) external view returns (bytes32[] memory)'
-        ];
+        // VaultRegistry ABI from compiled Hardhat artifacts to avoid ethers parsing bugs
+        const VaultRegistryArtifact = require('../contracts/artifacts/contracts/VaultRegistry.sol/VaultRegistry.json');
+        this.contractABI = VaultRegistryArtifact.abi;
 
         // Initialize relayer wallet if private key provided
         if (privateKey) {
@@ -134,6 +122,29 @@ class AvalancheManager {
             };
         } catch (error) {
             console.error('❌ Error in cancelVault:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Change Lawyer (Relayed)
+     */
+    async changeLawyer(testatorMnemonic, vaultId, newLawyer) {
+        try {
+            const testatorAddress = this.getAddressFromMnemonic(testatorMnemonic);
+            console.log(`⚖️ Changing lawyer for vault ${vaultId} to ${newLawyer} on behalf of ${testatorAddress}`);
+
+            const tx = await this.contract.changeLawyer(vaultId, newLawyer);
+            const receipt = await tx.wait();
+
+            return {
+                transactionHash: tx.hash,
+                blockNumber: receipt.blockNumber,
+                vaultId: vaultId,
+                newLawyer: newLawyer
+            };
+        } catch (error) {
+            console.error('❌ Error in changeLawyer:', error);
             throw error;
         }
     }

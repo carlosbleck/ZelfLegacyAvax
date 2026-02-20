@@ -1,0 +1,8 @@
+
+
+  VaultRegistry UUPS Upgrade
+    ✔ Should deploy and upgrade VaultRegistry (490ms)
+
+
+  1 passing (492ms)
+

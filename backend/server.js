@@ -170,6 +170,53 @@ app.post('/api/vault/decrypt-share', async (req, res) => {
 });
 
 /**
+ * POST /api/vault/collect-shares
+ * Endpoint for multiparty wills to collect and temporarily store decrypted shares.
+ * 
+ * Body:
+ * {
+ *   "vaultId": "0x...",
+ *   "beneficiaryAddress": "0x...",
+ *   "share": "decrypted_share_data"
+ * }
+ */
+const collectedShares = new Map(); // In-memory store for demo. In production, use DB.
+
+app.post('/api/vault/collect-shares', async (req, res) => {
+    try {
+        const { vaultId, beneficiaryAddress, share } = req.body;
+
+        if (!vaultId || !beneficiaryAddress || !share) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        console.log(`🤝 Collecting share for vault: ${vaultId} from ${beneficiaryAddress}`);
+
+        if (!collectedShares.has(vaultId)) {
+            collectedShares.set(vaultId, []);
+        }
+
+        const vaultShares = collectedShares.get(vaultId);
+
+        // Prevent duplicate submissions from the same address if needed, or just append
+        vaultShares.push({
+            beneficiary: beneficiaryAddress,
+            share: share,
+            timestamp: Date.now()
+        });
+
+        res.json({
+            success: true,
+            totalCollected: vaultShares.length,
+            message: 'Share collected successfully'
+        });
+    } catch (error) {
+        console.error('❌ Error collecting share:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
  * GET /api/vault/manifest/:cid
  * Retrieves the password shares manifest from IPFS
  */
@@ -280,6 +327,32 @@ app.post('/api/avalanche/cancel-vault', async (req, res) => {
         });
     } catch (error) {
         console.error('❌ Error cancelling vault:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * POST /api/avalanche/change-lawyer
+ * Testator changes the lawyer
+ */
+app.post('/api/avalanche/change-lawyer', async (req, res) => {
+    try {
+        const { testatorMnemonic, vaultId, newLawyerAddress } = req.body;
+
+        if (!testatorMnemonic || !vaultId || !newLawyerAddress) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        console.log(`🔄 Changing lawyer for vault: ${vaultId}`);
+
+        const result = await avalancheManager.changeLawyer(testatorMnemonic, vaultId, newLawyerAddress);
+
+        res.json({
+            success: true,
+            ...result
+        });
+    } catch (error) {
+        console.error('❌ Error changing lawyer:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -512,16 +585,20 @@ app.post('/api/avalanche/reject-vault', async (req, res) => {
     }
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 ZelfLegacy Backend running on http://0.0.0.0:${PORT}`);
-    console.log(`📡 Lit Protocol: ${process.env.LIT_NETWORK || 'nagaDev'} Network (v8/Naga)`);
-    console.log(`📦 IPFS: Pinata Gateway`);
-});
+// Start server only if run directly
+if (require.main === module) {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 ZelfLegacy Backend running on http://0.0.0.0:${PORT}`);
+        console.log(`📡 Lit Protocol: ${process.env.LIT_NETWORK || 'nagaDev'} Network (v8/Naga)`);
+        console.log(`📦 IPFS: Pinata Gateway`);
+    });
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('\n🛑 Shutting down gracefully...');
-    await litManager.disconnect();
-    process.exit(0);
-});
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+        console.log('\n🛑 Shutting down gracefully...');
+        await litManager.disconnect();
+        process.exit(0);
+    });
+}
+
+module.exports = app;

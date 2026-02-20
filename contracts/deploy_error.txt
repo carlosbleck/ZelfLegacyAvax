@@ -1,0 +1,12 @@
+Deploying VaultRegistry Proxy with the account: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+ProviderError: insufficient funds for gas * price + value: balance 0, tx cost 1183500449709083, overshot 1183500449709083
+    at HttpProvider.request (/Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/hardhat/src/internal/core/providers/http.ts:116:21)
+    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at HardhatEthersSigner.sendTransaction (/Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/@nomicfoundation/hardhat-ethers/src/signers.ts:185:18)
+    at ContractFactory.deploy (/Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/ethers/src.ts/contract/factory.ts:111:24)
+    at ethersDeploy (/Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/@openzeppelin/hardhat-upgrades/src/utils/deploy.ts:36:28)
+    at deploy (/Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/@openzeppelin/hardhat-upgrades/src/utils/deploy.ts:28:12)
+    at /Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/@openzeppelin/hardhat-upgrades/src/utils/deploy-impl.ts:127:49
+    at resumeOrDeploy (/Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/@openzeppelin/upgrades-core/src/deployment.ts:76:24)
+    at /Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/@openzeppelin/upgrades-core/src/impl-store.ts:63:23
+    at Manifest.lockedRun (/Users/bleck/Documents/Dev/Work/Node/ZelfLegacyAvax/contracts/node_modules/@openzeppelin/upgrades-core/src/manifest.ts:282:14)

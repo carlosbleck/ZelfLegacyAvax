@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+
 /**
  * @title VaultRegistry
- * @dev Manages inheritance vaults on Avalanche C-Chain.
+ * @dev Manages inheritance vaults on Avalanche C-Chain (UUPS Upgradeable).
  *      Stores metadata and access control logic.
  *      NO SECRETS are stored here. Only hashes and references (CIDs).
  */
-contract VaultRegistry {
+contract VaultRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     
     // Enum for vault state
     enum VaultState {
@@ -43,15 +47,6 @@ contract VaultRegistry {
         _;
     }
 
-    constructor() {
-        relayer = msg.sender; // Initial relayer is the deployer
-    }
-
-    function setRelayer(address _newRelayer) external {
-        require(msg.sender == relayer, "Only current relayer can update");
-        relayer = _newRelayer;
-    }
-
     // Mapping from Vault ID to Vault struct
     mapping(bytes32 => Vault) public vaults;
     
@@ -72,6 +67,32 @@ contract VaultRegistry {
     event DeathConfirmed(bytes32 indexed vaultId, address indexed lawyer);
     event VaultCancelled(bytes32 indexed vaultId, address indexed owner);
     event VaultExecuted(bytes32 indexed vaultId, address indexed beneficiary);
+    event LawyerChanged(bytes32 indexed vaultId, address indexed oldLawyer, address indexed newLawyer);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /**
+     * @dev Initializes the contract (replaces constructor for UUPS proxy).
+     * @param _initialOwner The address that will be the owner (upgrade authority)
+     */
+    function initialize(address _initialOwner) public initializer {
+        __Ownable_init(_initialOwner);
+        __UUPSUpgradeable_init();
+        relayer = _initialOwner; // Initial relayer is the owner
+    }
+
+    /**
+     * @dev Required by UUPSUpgradeable. Only the owner can authorize an upgrade.
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    function setRelayer(address _newRelayer) external {
+        require(msg.sender == relayer || msg.sender == owner(), "Only relayer or owner can update");
+        relayer = _newRelayer;
+    }
 
     /**
      * @dev Create a new inheritance vault.
@@ -208,6 +229,38 @@ contract VaultRegistry {
     }
 
     /**
+     * @dev Owner changes the lawyer if the current one is unresponsive.
+     * @param _vaultId The vault ID
+     * @param _newLawyer The new lawyer's address
+     */
+    function changeLawyer(bytes32 _vaultId, address _newLawyer) external {
+        Vault storage vault = vaults[_vaultId];
+        require(vault.exists, "Vault does not exist");
+        require(msg.sender == vault.owner || msg.sender == relayer, "Not authorized to change lawyer");
+        require(vault.state == VaultState.PendingLawyer, "Vault not in pending state");
+        require(_newLawyer != address(0), "Lawyer address cannot be zero");
+
+        address oldLawyer = vault.lawyer;
+        vault.lawyer = _newLawyer;
+        vault.createdAt = block.timestamp; // Reset timeout
+        
+        // Remove from old lawyer
+        bytes32[] storage oldList = lawyerVaults[oldLawyer];
+        for (uint256 i = 0; i < oldList.length; i++) {
+            if (oldList[i] == _vaultId) {
+                oldList[i] = oldList[oldList.length - 1];
+                oldList.pop();
+                break;
+            }
+        }
+        
+        // Add to new lawyer
+        lawyerVaults[_newLawyer].push(_vaultId);
+
+        emit LawyerChanged(_vaultId, oldLawyer, _newLawyer);
+    }
+
+    /**
      * @dev Check if a vault is claimable.
      * @param _vaultId The vault ID to check
      * @return bool True if claimable
@@ -219,6 +272,10 @@ contract VaultRegistry {
         }
         if (vault.state == VaultState.Claimable) {
             return true;
+        }
+        if (vault.state == VaultState.PendingLawyer) {
+            // Also use heartbeatInterval for lawyer acceptance timeout
+            return block.timestamp > (vault.createdAt + vault.heartbeatInterval);
         }
         if (vault.state != VaultState.Active && vault.state != VaultState.Warning) {
             return false;
