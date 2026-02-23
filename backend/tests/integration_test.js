@@ -19,15 +19,11 @@ async function main() {
     const lawyer1 = ethers.Wallet.createRandom();
     const lawyer2 = ethers.Wallet.createRandom();
 
-    // We need testator to have a mnemonic to match the manager's logic
-    const testatorMnemonic = testator.mnemonic.phrase;
-    const lawyer1Mnemonic = lawyer1.mnemonic.phrase;
-
     const vaultId = ethers.id("integration-test-vault-" + Date.now());
 
     console.log("1. Creating Vault...");
     await avaxManager.createVault(
-        testatorMnemonic,
+        testator.address,
         vaultId,
         [beneficiary.address],
         lawyer1.address,
@@ -37,7 +33,7 @@ async function main() {
     );
 
     console.log("2. Changing Lawyer in Pending state...");
-    await avaxManager.changeLawyer(testatorMnemonic, vaultId, lawyer2.address);
+    await avaxManager.changeLawyer(testator.address, vaultId, lawyer2.address);
 
     console.log("3. Fetching Vault Details...");
     const vault = await avaxManager.getVault(vaultId);

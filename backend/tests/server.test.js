@@ -1,4 +1,25 @@
+// Must set before server is loaded (middleware reads it at require time)
+process.env.LEGACY_CLIENT_SECRET = "test_client_secret";
+
 const request = require("supertest");
+const { ethers } = require("ethers");
+
+/**
+ * Build a valid authSig for testing. Signs the given message with a random wallet.
+ */
+async function buildAuthSig(message) {
+    const wallet = ethers.Wallet.createRandom();
+    const sig = await wallet.signMessage(message);
+    return {
+        sig,
+        signedMessage: message,
+        address: wallet.address,
+        derivedVia: "web3.eth.personal.sign"
+    };
+}
+
+/** Default header required for all /api/ routes */
+const clientHeader = { "X-Zelf-Client-Secret": "test_client_secret" };
 
 // Mock Lit Protocol ESM dependencies to prevent Jest syntax errors
 jest.mock("@lit-protocol/lit-client", () => ({}));
@@ -49,9 +70,23 @@ describe("Server API Enhancements", () => {
         expect(response.body.status).toBe("ok");
     });
 
+    it("should reject /api/ requests without X-Zelf-Client-Secret header", async () => {
+        const response = await request(app)
+            .post("/api/vault/collect-shares")
+            .send({
+                vaultId: "0x123",
+                beneficiaryAddress: "0xabc",
+                share: "mock_share_data"
+            });
+
+        expect(response.status).toBe(401);
+        expect(response.body.error).toContain("client key");
+    });
+
     it("should collect shares successfully", async () => {
         const response = await request(app)
             .post("/api/vault/collect-shares")
+            .set(clientHeader)
             .send({
                 vaultId: "0x123",
                 beneficiaryAddress: "0xabc",
@@ -64,15 +99,35 @@ describe("Server API Enhancements", () => {
     });
 
     it("should change lawyer successfully", async () => {
+        const vaultId = "0x123";
+        const newLawyerAddress = "0xlawyer";
+        const nonce = Date.now();
+        const message = `ZelfLegacy change-lawyer ${vaultId} ${newLawyerAddress} ${nonce}`;
+        const authSig = await buildAuthSig(message);
+
         const response = await request(app)
             .post("/api/avalanche/change-lawyer")
+            .set(clientHeader)
             .send({
-                testatorMnemonic: "test mnemonic",
-                vaultId: "0x123",
-                newLawyerAddress: "0xlawyer"
+                authSig,
+                vaultId,
+                newLawyerAddress
             });
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
+    });
+
+    it("should reject change-lawyer with invalid authSig", async () => {
+        const response = await request(app)
+            .post("/api/avalanche/change-lawyer")
+            .set(clientHeader)
+            .send({
+                authSig: { sig: "0xbad", signedMessage: "wrong", address: "0x123" },
+                vaultId: "0x123",
+                newLawyerAddress: "0xlawyer"
+            });
+
+        expect(response.status).toBe(401);
     });
 });

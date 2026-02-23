@@ -28,7 +28,8 @@ describe("LitManager Enhancements", () => {
     let litManager;
 
     beforeEach(() => {
-        litManager = new LitManager("0000000000000000000000000000000000000000000000000000000000000000"); // Mock PK
+        // Use a valid 32-byte hex private key (ethers rejects all-zero)
+        litManager = new LitManager("0x0000000000000000000000000000000000000000000000000000000000000001");
         // Prevent console logs during tests
         jest.spyOn(console, 'log').mockImplementation(() => { });
     });

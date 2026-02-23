@@ -6,6 +6,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { ethers } = require('ethers');
 const LitManager = require('./lit-manager');
 const IPFSManager = require('./ipfs-manager');
 const AvalancheManager = require('./avalanche-manager');
@@ -25,6 +26,49 @@ process.emitWarning = (warning, ...args) => {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// --- Client authentication ---
+// All /api/ routes require the X-Zelf-Client-Secret header to match LEGACY_CLIENT_SECRET.
+const LEGACY_CLIENT_SECRET = process.env.LEGACY_CLIENT_SECRET;
+const requireClientKey = (req, res, next) => {
+    const key = req.headers['x-zelf-client-secret'];
+    if (!LEGACY_CLIENT_SECRET || key !== LEGACY_CLIENT_SECRET) {
+        return res.status(401).json({ error: 'Invalid or missing client key' });
+    }
+    next();
+};
+app.use('/api/', requireClientKey);
+
+/**
+ * Verify an EIP-191 authSig object and return the recovered signer address.
+ * Throws if the signature is invalid or the message does not start with expectedPrefix.
+ *
+ * @param {{ sig: string, signedMessage: string, address: string }} authSig
+ * @param {string} [expectedPrefix]  - Optional message prefix to guard against cross-action replay.
+ * @returns {string} checksummed signer address
+ */
+function verifyAuthSig(authSig, expectedPrefix) {
+    if (!authSig || !authSig.sig || !authSig.signedMessage || !authSig.address) {
+        throw new Error('Invalid authSig: missing required fields (sig, signedMessage, address)');
+    }
+
+    let recovered;
+    try {
+        recovered = ethers.verifyMessage(authSig.signedMessage, authSig.sig);
+    } catch (e) {
+        throw new Error(`Invalid signature format: ${e.message}`);
+    }
+
+    if (recovered.toLowerCase() !== authSig.address.toLowerCase()) {
+        throw new Error('Signature address mismatch');
+    }
+
+    if (expectedPrefix && !authSig.signedMessage.startsWith(expectedPrefix)) {
+        throw new Error(`Invalid signed message. Expected prefix: "${expectedPrefix}"`);
+    }
+
+    return recovered;
+}
 
 // Initialize managers
 const litManager = new LitManager(process.env.RELAYER_PRIVATE_KEY);
@@ -146,22 +190,12 @@ app.post('/api/vault/decrypt-share', async (req, res) => {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        // 1. Verify EIP-191 Signature
-        const { ethers } = require('ethers');
+        // 1. Verify EIP-191 signature and message content
         let recoveredAddress;
         try {
-            recoveredAddress = ethers.verifyMessage(authSig.signedMessage, authSig.sig);
+            recoveredAddress = verifyAuthSig(authSig, 'Lit Protocol Access');
         } catch (e) {
-            return res.status(401).json({ error: 'Invalid signature format' });
-        }
-
-        if (recoveredAddress.toLowerCase() !== authSig.address.toLowerCase()) {
-            return res.status(401).json({ error: 'Signature address mismatch' });
-        }
-
-        // 1.1 Verify Signed Message content to avoid reuse
-        if (authSig.signedMessage !== 'Lit Protocol Access') {
-            return res.status(401).json({ error: 'Invalid signed message content' });
+            return res.status(401).json({ error: e.message });
         }
 
         // 2. Force use of the official contract address from environment
@@ -273,7 +307,7 @@ app.get('/api/vault/manifest/:cid', async (req, res) => {
 app.post('/api/avalanche/create-vault', async (req, res) => {
     try {
         const {
-            testatorMnemonic,
+            authSig,
             beneficiaryAddress,
             lawyerAddress,
             heartbeatInterval,
@@ -282,16 +316,23 @@ app.post('/api/avalanche/create-vault', async (req, res) => {
             vaultId
         } = req.body;
 
-        if (!testatorMnemonic || !beneficiaryAddress || !ipfsCid || !ipfsCidValidator) {
+        if (!authSig || !beneficiaryAddress || !ipfsCid || !ipfsCidValidator || !vaultId) {
             return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        let testatorAddress;
+        try {
+            testatorAddress = verifyAuthSig(authSig, `ZelfLegacy create-vault ${vaultId} ${beneficiaryAddress}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
         }
 
         console.log(`🏔️ Creating Avalanche vault: ${vaultId}`);
 
         const result = await avalancheManager.createVault(
-            testatorMnemonic,
+            testatorAddress,
             vaultId,
-            [beneficiaryAddress], // Single beneficiary for now
+            [beneficiaryAddress],
             lawyerAddress,
             heartbeatInterval || 2592000, // 30 days default
             ipfsCid,
@@ -314,15 +355,22 @@ app.post('/api/avalanche/create-vault', async (req, res) => {
  */
 app.post('/api/avalanche/update-heartbeat', async (req, res) => {
     try {
-        const { testatorMnemonic, vaultId } = req.body;
+        const { authSig, vaultId } = req.body;
 
-        if (!testatorMnemonic || !vaultId) {
+        if (!authSig || !vaultId) {
             return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        let testatorAddress;
+        try {
+            testatorAddress = verifyAuthSig(authSig, `ZelfLegacy update-heartbeat ${vaultId}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
         }
 
         console.log(`💓 Updating heartbeat for vault: ${vaultId}`);
 
-        const result = await avalancheManager.updateHeartbeat(testatorMnemonic, vaultId);
+        const result = await avalancheManager.updateHeartbeat(testatorAddress, vaultId);
 
         res.json({
             success: true,
@@ -340,15 +388,22 @@ app.post('/api/avalanche/update-heartbeat', async (req, res) => {
  */
 app.post('/api/avalanche/cancel-vault', async (req, res) => {
     try {
-        const { testatorMnemonic, vaultId } = req.body;
+        const { authSig, vaultId } = req.body;
 
-        if (!testatorMnemonic || !vaultId) {
+        if (!authSig || !vaultId) {
             return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        let testatorAddress;
+        try {
+            testatorAddress = verifyAuthSig(authSig, `ZelfLegacy cancel-vault ${vaultId}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
         }
 
         console.log(`🚫 Cancelling vault: ${vaultId}`);
 
-        const result = await avalancheManager.cancelVault(testatorMnemonic, vaultId);
+        const result = await avalancheManager.cancelVault(testatorAddress, vaultId);
 
         res.json({
             success: true,
@@ -366,15 +421,22 @@ app.post('/api/avalanche/cancel-vault', async (req, res) => {
  */
 app.post('/api/avalanche/change-lawyer', async (req, res) => {
     try {
-        const { testatorMnemonic, vaultId, newLawyerAddress } = req.body;
+        const { authSig, vaultId, newLawyerAddress } = req.body;
 
-        if (!testatorMnemonic || !vaultId || !newLawyerAddress) {
+        if (!authSig || !vaultId || !newLawyerAddress) {
             return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        let testatorAddress;
+        try {
+            testatorAddress = verifyAuthSig(authSig, `ZelfLegacy change-lawyer ${vaultId} ${newLawyerAddress}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
         }
 
         console.log(`🔄 Changing lawyer for vault: ${vaultId}`);
 
-        const result = await avalancheManager.changeLawyer(testatorMnemonic, vaultId, newLawyerAddress);
+        const result = await avalancheManager.changeLawyer(testatorAddress, vaultId, newLawyerAddress);
 
         res.json({
             success: true,
@@ -389,21 +451,26 @@ app.post('/api/avalanche/change-lawyer', async (req, res) => {
 /**
  * POST /api/avalanche/confirm-death
  * Confirms death (lawyer only).
- * Body: { lawyerMnemonic: string, vaultId: string }
+ * Body: { authSig: object, vaultId: string }
  */
 app.post('/api/avalanche/confirm-death', async (req, res) => {
     try {
-        // Accept both field names for compatibility
-        const lawyerMnemonic = req.body.lawyerMnemonic || req.body.mnemonic;
-        const { vaultId } = req.body;
+        const { authSig, vaultId } = req.body;
 
-        if (!lawyerMnemonic || !vaultId) {
-            return res.status(400).json({ error: 'Missing lawyerMnemonic/mnemonic or vaultId' });
+        if (!authSig || !vaultId) {
+            return res.status(400).json({ error: 'Missing authSig or vaultId' });
+        }
+
+        let lawyerAddress;
+        try {
+            lawyerAddress = verifyAuthSig(authSig, `ZelfLegacy confirm-death ${vaultId}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
         }
 
         console.log(`⚰️ Confirming death for vault: ${vaultId}`);
 
-        const result = await avalancheManager.confirmDeath(lawyerMnemonic, vaultId);
+        const result = await avalancheManager.confirmDeath(lawyerAddress, vaultId);
 
         res.json({
             success: true,
@@ -559,16 +626,24 @@ app.get('/api/avalanche/lawyer-vaults/:address', async (req, res) => {
  * POST /api/avalanche/execute-vault
  * Executes (marks as claimed) a vault that is in Claimable state.
  * Called after the beneficiary has reconstructed the master password.
- * Body: { beneficiaryMnemonic: string, vaultId: string }
+ * Body: { authSig: object, vaultId: string }
  */
 app.post('/api/avalanche/execute-vault', async (req, res) => {
     try {
-        const { beneficiaryMnemonic, vaultId } = req.body;
-        if (!beneficiaryMnemonic || !vaultId) {
-            return res.status(400).json({ error: 'Missing beneficiaryMnemonic or vaultId' });
+        const { authSig, vaultId } = req.body;
+        if (!authSig || !vaultId) {
+            return res.status(400).json({ error: 'Missing authSig or vaultId' });
         }
+
+        let beneficiaryAddress;
+        try {
+            beneficiaryAddress = verifyAuthSig(authSig, `ZelfLegacy execute-vault ${vaultId}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
+        }
+
         console.log(`✅ Executing vault: ${vaultId}`);
-        const result = await avalancheManager.executeVault(beneficiaryMnemonic, vaultId);
+        const result = await avalancheManager.executeVault(beneficiaryAddress, vaultId);
         res.json({ success: true, ...result });
     } catch (error) {
         console.error('❌ Error executing vault:', error);
@@ -582,12 +657,20 @@ app.post('/api/avalanche/execute-vault', async (req, res) => {
  */
 app.post('/api/avalanche/accept-vault', async (req, res) => {
     try {
-        const { mnemonic, vaultId } = req.body;
-        if (!mnemonic || !vaultId) {
-            return res.status(400).json({ error: 'Missing mnemonic or vaultId' });
+        const { authSig, vaultId } = req.body;
+        if (!authSig || !vaultId) {
+            return res.status(400).json({ error: 'Missing authSig or vaultId' });
         }
+
+        let lawyerAddress;
+        try {
+            lawyerAddress = verifyAuthSig(authSig, `ZelfLegacy accept-vault ${vaultId}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
+        }
+
         console.log(`✅ Lawyer accepting vault: ${vaultId}`);
-        const result = await avalancheManager.acceptVault(mnemonic, vaultId);
+        const result = await avalancheManager.acceptVault(lawyerAddress, vaultId);
         res.json({ success: true, result });
     } catch (error) {
         console.error('❌ Error accepting vault:', error);
@@ -601,12 +684,20 @@ app.post('/api/avalanche/accept-vault', async (req, res) => {
  */
 app.post('/api/avalanche/reject-vault', async (req, res) => {
     try {
-        const { mnemonic, vaultId } = req.body;
-        if (!mnemonic || !vaultId) {
-            return res.status(400).json({ error: 'Missing mnemonic or vaultId' });
+        const { authSig, vaultId } = req.body;
+        if (!authSig || !vaultId) {
+            return res.status(400).json({ error: 'Missing authSig or vaultId' });
         }
+
+        let lawyerAddress;
+        try {
+            lawyerAddress = verifyAuthSig(authSig, `ZelfLegacy reject-vault ${vaultId}`);
+        } catch (e) {
+            return res.status(401).json({ error: e.message });
+        }
+
         console.log(`🚫 Lawyer rejecting vault: ${vaultId}`);
-        const result = await avalancheManager.rejectVault(mnemonic, vaultId);
+        const result = await avalancheManager.rejectVault(lawyerAddress, vaultId);
         res.json({ success: true, result });
     } catch (error) {
         console.error('❌ Error rejecting vault:', error);

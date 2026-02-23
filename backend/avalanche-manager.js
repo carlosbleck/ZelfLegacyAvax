@@ -38,9 +38,10 @@ class AvalancheManager {
 
     /**
      * Create a new vault (Relayed: Relayer pays gas, testator remains owner)
+     * @param {string} testatorAddress - Verified testator address (recovered from authSig by caller)
      */
     async createVault(
-        testatorMnemonic,
+        testatorAddress,
         vaultId,
         beneficiaries,
         lawyer,
@@ -49,8 +50,6 @@ class AvalancheManager {
         ipfsCidValidator
     ) {
         try {
-            const testatorAddress = this.getAddressFromMnemonic(testatorMnemonic);
-
             console.log(`🏔️ Creating vault ${vaultId} for testator ${testatorAddress} (Relayed)`);
 
             // Use the relayer to send the transaction
@@ -84,10 +83,10 @@ class AvalancheManager {
 
     /**
      * Update heartbeat (Relayed)
+     * @param {string} testatorAddress - Verified testator address (recovered from authSig by caller)
      */
-    async updateHeartbeat(testatorMnemonic, vaultId) {
+    async updateHeartbeat(testatorAddress, vaultId) {
         try {
-            const testatorAddress = this.getAddressFromMnemonic(testatorMnemonic);
             console.log(`💓 Updating heartbeat for vault ${vaultId} on behalf of ${testatorAddress}`);
 
             const tx = await this.contract.updateHeartbeat(vaultId);
@@ -106,10 +105,10 @@ class AvalancheManager {
 
     /**
      * Cancel vault (Relayed)
+     * @param {string} testatorAddress - Verified testator address (recovered from authSig by caller)
      */
-    async cancelVault(testatorMnemonic, vaultId) {
+    async cancelVault(testatorAddress, vaultId) {
         try {
-            const testatorAddress = this.getAddressFromMnemonic(testatorMnemonic);
             console.log(`🚫 Cancelling vault ${vaultId} on behalf of ${testatorAddress}`);
 
             const tx = await this.contract.cancelVault(vaultId);
@@ -128,10 +127,10 @@ class AvalancheManager {
 
     /**
      * Change Lawyer (Relayed)
+     * @param {string} testatorAddress - Verified testator address (recovered from authSig by caller)
      */
-    async changeLawyer(testatorMnemonic, vaultId, newLawyer) {
+    async changeLawyer(testatorAddress, vaultId, newLawyer) {
         try {
-            const testatorAddress = this.getAddressFromMnemonic(testatorMnemonic);
             console.log(`⚖️ Changing lawyer for vault ${vaultId} to ${newLawyer} on behalf of ${testatorAddress}`);
 
             const tx = await this.contract.changeLawyer(vaultId, newLawyer);
@@ -252,11 +251,10 @@ class AvalancheManager {
 
     /**
      * Accept a vault (Lawyer only)
-     * Backend verifies the mnemonic actually belongs to the vault's lawyer before relaying.
+     * @param {string} lawyerAddress - Verified lawyer address (recovered from authSig by caller)
      */
-    async acceptVault(lawyerMnemonic, vaultId) {
+    async acceptVault(lawyerAddress, vaultId) {
         try {
-            const lawyerAddress = this.getAddressFromMnemonic(lawyerMnemonic);
             console.log(`⚖️ Accepting vault ${vaultId} as lawyer ${lawyerAddress}`);
 
             const vault = await this.contract.getVault(vaultId);
@@ -280,11 +278,10 @@ class AvalancheManager {
 
     /**
      * Reject a vault (Lawyer only)
-     * Backend verifies the mnemonic actually belongs to the vault's lawyer before relaying.
+     * @param {string} lawyerAddress - Verified lawyer address (recovered from authSig by caller)
      */
-    async rejectVault(lawyerMnemonic, vaultId) {
+    async rejectVault(lawyerAddress, vaultId) {
         try {
-            const lawyerAddress = this.getAddressFromMnemonic(lawyerMnemonic);
             console.log(`⚖️ Rejecting vault ${vaultId} as lawyer ${lawyerAddress}`);
 
             const vault = await this.contract.getVault(vaultId);
@@ -308,11 +305,10 @@ class AvalancheManager {
 
     /**
      * Confirm death (Lawyer only)
-     * Backend verifies the mnemonic actually belongs to the vault's lawyer before relaying.
+     * @param {string} lawyerAddress - Verified lawyer address (recovered from authSig by caller)
      */
-    async confirmDeath(lawyerMnemonic, vaultId) {
+    async confirmDeath(lawyerAddress, vaultId) {
         try {
-            const lawyerAddress = this.getAddressFromMnemonic(lawyerMnemonic);
             console.log(`⚰️ Confirming death for vault ${vaultId} as lawyer ${lawyerAddress}`);
 
             const vault = await this.contract.getVault(vaultId);
@@ -336,11 +332,11 @@ class AvalancheManager {
     /**
      * Execute a vault on-chain (mark as Executed).
      * Any caller is allowed by the contract (relayer pays gas), but backend guarantees
-     * the mnemonic signature corresponds to an authorized beneficiary.
+     * the address corresponds to an authorized beneficiary.
+     * @param {string} beneficiaryAddress - Verified beneficiary address (recovered from authSig by caller)
      */
-    async executeVault(beneficiaryMnemonic, vaultId) {
+    async executeVault(beneficiaryAddress, vaultId) {
         try {
-            const beneficiaryAddress = this.getAddressFromMnemonic(beneficiaryMnemonic);
             console.log(`✅ Executing vault ${vaultId} on behalf of beneficiary ${beneficiaryAddress}`);
 
             const isBen = await this.contract.isBeneficiary(vaultId, beneficiaryAddress);

@@ -67,6 +67,8 @@ class LitManager {
         await this.connect();
 
         // EVM contract conditions: only claimable vaults can decrypt
+        // Note: evmContractConditions accepts only evmContract conditions (not evmBasic).
+        // The relayer address restriction is enforced at the API layer (server verifies beneficiary before decrypting).
         const evmContractConditions = [
             {
                 contractAddress: contractAddress,
@@ -86,19 +88,6 @@ class LitManager {
                     value: 'true',
                 },
             },
-            { operator: "and" },
-            {
-                conditionType: "evmBasic",
-                contractAddress: "",
-                standardContractType: "",
-                chain: this.chain,
-                method: "",
-                parameters: [":userAddress"],
-                returnValueTest: {
-                    comparator: "=",
-                    value: this.relayerAddress
-                }
-            }
         ];
 
         const encrypted = await this.litClient.encrypt({
@@ -144,19 +133,6 @@ class LitManager {
                     value: 'true',
                 },
             },
-            { operator: "and" },
-            {
-                conditionType: "evmBasic",
-                contractAddress: "",
-                standardContractType: "",
-                chain: this.chain,
-                method: "",
-                parameters: [":userAddress"],
-                returnValueTest: {
-                    comparator: "=",
-                    value: this.relayerAddress
-                }
-            }
         ];
 
         // Generate a fresh Ed25519 session keypair for this request
