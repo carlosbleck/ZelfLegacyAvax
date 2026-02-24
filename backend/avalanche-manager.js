@@ -47,10 +47,11 @@ class AvalancheManager {
         lawyer,
         heartbeatInterval,
         ipfsCid,
-        ipfsCidValidator
+        ipfsCidValidator,
+        threshold
     ) {
         try {
-            console.log(`🏔️ Creating vault ${vaultId} for testator ${testatorAddress} (Relayed)`);
+            console.log(`🏔️ Creating vault ${vaultId} for testator ${testatorAddress} (Relayed) with threshold ${threshold}`);
 
             // Use the relayer to send the transaction
             const tx = await this.contract.createVault(
@@ -58,7 +59,7 @@ class AvalancheManager {
                 vaultId,
                 beneficiaries,
                 lawyer,
-                2, // Default threshold: at least 2 people needed (k-of-n)
+                threshold,
                 heartbeatInterval,
                 ipfsCid,
                 ipfsCidValidator

@@ -96,46 +96,58 @@ const avalancheManager = new AvalancheManager(
  */
 app.post('/api/vault/encrypt-shares', async (req, res) => {
     try {
-        const { passwordparty, passwordlawyer, vaultId, contractAddress } = req.body;
+        const { shares, vaultId, contractAddress } = req.body;
 
-        if (!passwordparty || !passwordlawyer || !vaultId || !contractAddress) {
-            return res.status(400).json({ error: 'Missing required fields' });
+        if (!shares || !Array.isArray(shares) || !vaultId || !contractAddress) {
+            return res.status(400).json({ error: 'Missing required fields or invalid shares format' });
         }
 
-        console.log(`📦 Encrypting shares for vault: ${vaultId}`);
+        console.log(`📦 Encrypting ${shares.length} share pairs for vault: ${vaultId}`);
 
         const officialContractAddress = process.env.VAULT_REGISTRY_ADDRESS;
+        const encryptedSharesManifest = [];
 
-        // Encrypt both shares with Lit Protocol (access gated by VaultRegistry.isClaimable)
-        const encryptedParty = await litManager.encryptPasswordShare(
-            passwordparty,
-            vaultId,
-            officialContractAddress
-        );
+        for (const sharePair of shares) {
+            const { address, passwordparty, passwordlawyer } = sharePair;
 
-        const encryptedLawyer = await litManager.encryptPasswordShare(
-            passwordlawyer,
-            vaultId,
-            officialContractAddress
-        );
+            console.log(`  - Encrypting shares for beneficiary: ${address}`);
 
-        // Upload encrypted shares to IPFS
-        const partyCID = await ipfsManager.uploadEncryptedShare(
-            encryptedParty,
-            'passwordparty',
-            vaultId
-        );
+            // Encrypt both shares with Lit Protocol (access gated by VaultRegistry.isClaimable)
+            const encryptedParty = await litManager.encryptPasswordShare(
+                passwordparty,
+                vaultId,
+                officialContractAddress
+            );
 
-        const lawyerCID = await ipfsManager.uploadEncryptedShare(
-            encryptedLawyer,
-            'passwordlawyer',
-            vaultId
-        );
+            const encryptedLawyer = await litManager.encryptPasswordShare(
+                passwordlawyer,
+                vaultId,
+                officialContractAddress
+            );
+
+            // Upload encrypted shares to IPFS
+            const partyCID = await ipfsManager.uploadEncryptedShare(
+                encryptedParty,
+                `passwordparty_${address}`,
+                vaultId
+            );
+
+            const lawyerCID = await ipfsManager.uploadEncryptedShare(
+                encryptedLawyer,
+                `passwordlawyer_${address}`,
+                vaultId
+            );
+
+            encryptedSharesManifest.push({
+                address,
+                party: `ipfs://${partyCID}`,
+                lawyer: `ipfs://${lawyerCID}`
+            });
+        }
 
         // Create manifest object
         const manifest = JSON.stringify({
-            passwordparty: `ipfs://${partyCID}`,
-            passwordlawyer: `ipfs://${lawyerCID}`,
+            shares: encryptedSharesManifest
         });
 
         console.log(`🔒 Encrypting manifest for vault: ${vaultId}`);
@@ -144,24 +156,20 @@ app.post('/api/vault/encrypt-shares', async (req, res) => {
         const encryptedManifest = await litManager.encryptPasswordShare(
             manifest,
             vaultId,
-            contractAddress
+            officialContractAddress
         );
 
         // Upload encrypted manifest to IPFS
-        // We reuse uploadEncryptedShare since the structure { ciphertext, dataToEncryptHash } is exactly what we need
-        // equivalent to a "share" but containing the manifest content
         const manifestCID = await ipfsManager.uploadEncryptedShare(
             encryptedManifest,
             'manifest',
             vaultId
         );
 
-        console.log(`✅ Shares & Manifest encrypted and uploaded for vault: ${vaultId}`);
+        console.log(`✅ ${shares.length} Shares & Manifest encrypted and uploaded for vault: ${vaultId}`);
 
         res.json({
             success: true,
-            passwordpartyCID: partyCID,
-            passwordlawyerCID: lawyerCID,
             manifestCID: manifestCID,
         });
     } catch (error) {
@@ -308,35 +316,37 @@ app.post('/api/avalanche/create-vault', async (req, res) => {
     try {
         const {
             authSig,
-            beneficiaryAddress,
+            beneficiaryAddresses,
             lawyerAddress,
             heartbeatInterval,
             ipfsCid,
             ipfsCidValidator,
-            vaultId
+            vaultId,
+            threshold
         } = req.body;
 
-        if (!authSig || !beneficiaryAddress || !ipfsCid || !ipfsCidValidator || !vaultId) {
+        if (!authSig || !beneficiaryAddresses || !ipfsCid || !ipfsCidValidator || !vaultId || !threshold) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
         let testatorAddress;
         try {
-            testatorAddress = verifyAuthSig(authSig, `ZelfLegacy create-vault ${vaultId} ${beneficiaryAddress}`);
+            testatorAddress = verifyAuthSig(authSig, `ZelfLegacy create-vault ${vaultId} ${beneficiaryAddresses[0]}`);
         } catch (e) {
             return res.status(401).json({ error: e.message });
         }
 
-        console.log(`🏔️ Creating Avalanche vault: ${vaultId}`);
+        console.log(`🏔️ Creating Avalanche vault: ${vaultId} with ${beneficiaryAddresses.length} beneficiaries and threshold ${threshold}`);
 
         const result = await avalancheManager.createVault(
             testatorAddress,
             vaultId,
-            [beneficiaryAddress],
+            beneficiaryAddresses,
             lawyerAddress,
             heartbeatInterval || 2592000, // 30 days default
             ipfsCid,
-            ipfsCidValidator
+            ipfsCidValidator,
+            threshold
         );
 
         res.json({
