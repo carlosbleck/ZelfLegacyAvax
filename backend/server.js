@@ -6,6 +6,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const { ethers } = require('ethers');
 const LitManager = require('./lit-manager');
 const IPFSManager = require('./ipfs-manager');
@@ -242,47 +244,106 @@ app.post('/api/vault/decrypt-share', async (req, res) => {
 
 /**
  * POST /api/vault/collect-shares
- * Endpoint for multiparty wills to collect and temporarily store decrypted shares.
+ * Collects a beneficiary's decrypted Level 1 share for multi-party reconstruction.
+ * Shares are persisted to a local JSON file so they survive server restarts.
  * 
  * Body:
  * {
  *   "vaultId": "0x...",
  *   "beneficiaryAddress": "0x...",
- *   "share": "decrypted_share_data"
+ *   "partyShare": "1:abc...",   // Beneficiary's Level 1 Shamir share
+ *   "lawyerShare": "2:def..."   // Common lawyer share (same for all beneficiaries)
  * }
  */
-const collectedShares = new Map(); // In-memory store for demo. In production, use DB.
+const SHARES_FILE = path.join(__dirname, 'collected_shares.json');
+
+function loadSharesFromDisk() {
+    try {
+        if (fs.existsSync(SHARES_FILE)) {
+            return JSON.parse(fs.readFileSync(SHARES_FILE, 'utf8'));
+        }
+    } catch (e) {
+        console.warn('⚠️ Could not load shares from disk:', e.message);
+    }
+    return {};
+}
+
+function saveSharesToDisk(sharesData) {
+    try {
+        fs.writeFileSync(SHARES_FILE, JSON.stringify(sharesData, null, 2), 'utf8');
+    } catch (e) {
+        console.error('❌ Could not persist shares to disk:', e.message);
+    }
+}
 
 app.post('/api/vault/collect-shares', async (req, res) => {
     try {
-        const { vaultId, beneficiaryAddress, share } = req.body;
+        const { vaultId, beneficiaryAddress, partyShare, lawyerShare } = req.body;
 
-        if (!vaultId || !beneficiaryAddress || !share) {
-            return res.status(400).json({ error: 'Missing required fields' });
+        if (!vaultId || !beneficiaryAddress || !partyShare) {
+            return res.status(400).json({ error: 'Missing required fields: vaultId, beneficiaryAddress, partyShare' });
         }
 
         console.log(`🤝 Collecting share for vault: ${vaultId} from ${beneficiaryAddress}`);
 
-        if (!collectedShares.has(vaultId)) {
-            collectedShares.set(vaultId, []);
+        const sharesData = loadSharesFromDisk();
+
+        if (!sharesData[vaultId]) {
+            sharesData[vaultId] = [];
         }
 
-        const vaultShares = collectedShares.get(vaultId);
+        // Prevent duplicate submissions from the same address
+        const existing = sharesData[vaultId].find(
+            s => s.beneficiary.toLowerCase() === beneficiaryAddress.toLowerCase()
+        );
+        if (existing) {
+            return res.json({
+                success: true,
+                totalCollected: sharesData[vaultId].length,
+                message: 'Share already collected for this beneficiary'
+            });
+        }
 
-        // Prevent duplicate submissions from the same address if needed, or just append
-        vaultShares.push({
+        sharesData[vaultId].push({
             beneficiary: beneficiaryAddress,
-            share: share,
+            partyShare,
+            lawyerShare: lawyerShare || null,   // Optional — same lawyer share for all
             timestamp: Date.now()
         });
 
+        saveSharesToDisk(sharesData);
+
         res.json({
             success: true,
-            totalCollected: vaultShares.length,
+            totalCollected: sharesData[vaultId].length,
             message: 'Share collected successfully'
         });
     } catch (error) {
         console.error('❌ Error collecting share:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * GET /api/vault/shares/:vaultId
+ * Returns all collected Level 1 shares for a vault (used by the last beneficiary to reconstruct).
+ */
+app.get('/api/vault/shares/:vaultId', async (req, res) => {
+    try {
+        const { vaultId } = req.params;
+        console.log(`📂 Fetching shares for vault: ${vaultId}`);
+
+        const sharesData = loadSharesFromDisk();
+        const vaultShares = sharesData[vaultId] || [];
+
+        res.json({
+            success: true,
+            vaultId,
+            shares: vaultShares,
+            totalCollected: vaultShares.length
+        });
+    } catch (error) {
+        console.error('❌ Error fetching shares:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -652,11 +713,35 @@ app.post('/api/avalanche/execute-vault', async (req, res) => {
             return res.status(401).json({ error: e.message });
         }
 
-        console.log(`✅ Executing vault: ${vaultId}`);
+        console.log(`✅ Executing vault: ${vaultId} for beneficiary: ${beneficiaryAddress}`);
         const result = await avalancheManager.executeVault(beneficiaryAddress, vaultId);
-        res.json({ success: true, ...result });
+        res.json({
+            success: true,
+            ...result
+        });
     } catch (error) {
         console.error('❌ Error executing vault:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * GET /api/avalanche/execution-status/:vaultId
+ * Returns how many beneficiaries have accepted and the threshold required.
+ */
+app.get('/api/avalanche/execution-status/:vaultId', async (req, res) => {
+    try {
+        const { vaultId } = req.params;
+        console.log(`📊 Getting execution status for vault: ${vaultId}`);
+        const status = await avalancheManager.getExecutionStatus(vaultId);
+        res.json({
+            success: true,
+            vaultId,
+            ...status,
+            fullyExecuted: status.executedCount >= status.threshold
+        });
+    } catch (error) {
+        console.error('❌ Error getting execution status:', error);
         res.status(500).json({ error: error.message });
     }
 });

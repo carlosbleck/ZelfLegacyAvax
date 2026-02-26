@@ -38,6 +38,7 @@ contract VaultRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         string ipfsCidValidator;    // CID of validation/share data (.legacyparty/.legacylawyer)
         bool exists;                // Flag to check existence
         VaultState state;           // Current state of the vault
+        uint256 executedCount;      // Number of beneficiaries who have accepted the vault
     }
 
     address public relayer;         // Central wallet to perform fees
@@ -59,6 +60,9 @@ contract VaultRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     // Mapping from Beneficiary address to Vault IDs they are part of
     mapping(address => bytes32[]) public beneficiaryVaults;
 
+    // Mapping to track which beneficiaries have already accepted a given vault
+    mapping(bytes32 => mapping(address => bool)) public executedBeneficiaries;
+
     // Events
     event VaultCreated(bytes32 indexed vaultId, address indexed owner, address indexed lawyer);
     event VaultAccepted(bytes32 indexed vaultId, address indexed lawyer);
@@ -66,7 +70,7 @@ contract VaultRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     event HeartbeatUpdated(bytes32 indexed vaultId, uint256 lastPing);
     event DeathConfirmed(bytes32 indexed vaultId, address indexed lawyer);
     event VaultCancelled(bytes32 indexed vaultId, address indexed owner);
-    event VaultExecuted(bytes32 indexed vaultId, address indexed beneficiary);
+    event VaultExecuted(bytes32 indexed vaultId, address indexed beneficiary, uint256 executedCount, uint256 threshold);
     event LawyerChanged(bytes32 indexed vaultId, address indexed oldLawyer, address indexed newLawyer);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -284,25 +288,52 @@ contract VaultRegistry is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     }
 
     /**
-     * @dev Mark the vault as executed.
-     * @param _vaultId The vault ID to execute
+     * @dev Record a beneficiary's acceptance of the vault.
+     *      When the number of acceptances reaches the threshold, the vault is marked Executed.
+     *      The relayer calls this on behalf of a beneficiary, passing `_beneficiary` explicitly.
+     *      A beneficiary can also call this directly (without relayer).
+     * @param _vaultId    The vault ID to execute
+     * @param _beneficiary The beneficiary address accepting the vault (ignored unless msg.sender == relayer)
      */
-    function executeVault(bytes32 _vaultId) external {
+    function executeVault(bytes32 _vaultId, address _beneficiary) external {
         Vault storage vault = vaults[_vaultId];
         require(vault.exists, "Vault does not exist");
         require(this.isClaimable(_vaultId), "Vault is not claimable yet");
         require(
             vault.state == VaultState.Active || 
             vault.state == VaultState.Warning ||
-            vault.state == VaultState.Claimable, 
+            vault.state == VaultState.Claimable,
             "Invalid state for execution"
         );
 
-        require(isBeneficiary(_vaultId, msg.sender) || msg.sender == relayer, "Only beneficiary or relayer can execute");
+        // Determine who is accepting: relayer acts on behalf of _beneficiary
+        address actor = (msg.sender == relayer) ? _beneficiary : msg.sender;
 
-        vault.state = VaultState.Executed;
-        
-        emit VaultExecuted(_vaultId, msg.sender);
+        require(isBeneficiary(_vaultId, actor), "Only a beneficiary can execute");
+        require(!executedBeneficiaries[_vaultId][actor], "Beneficiary has already accepted this vault");
+
+        // Record the acceptance
+        executedBeneficiaries[_vaultId][actor] = true;
+        vault.executedCount += 1;
+
+        // Only mark as fully Executed once threshold is reached
+        if (vault.executedCount >= vault.threshold) {
+            vault.state = VaultState.Executed;
+        }
+
+        emit VaultExecuted(_vaultId, actor, vault.executedCount, vault.threshold);
+    }
+
+    /**
+     * @dev Return the current execution status for a multi-party vault.
+     * @param _vaultId The vault ID to query
+     * @return executedCount Number of beneficiaries who have accepted
+     * @return threshold     Total acceptances required
+     */
+    function getExecutionStatus(bytes32 _vaultId) external view returns (uint256, uint256) {
+        Vault storage vault = vaults[_vaultId];
+        require(vault.exists, "Vault does not exist");
+        return (vault.executedCount, vault.threshold);
     }
 
     /**

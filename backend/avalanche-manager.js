@@ -331,9 +331,8 @@ class AvalancheManager {
         }
     }
     /**
-     * Execute a vault on-chain (mark as Executed).
-     * Any caller is allowed by the contract (relayer pays gas), but backend guarantees
-     * the address corresponds to an authorized beneficiary.
+     * Execute a vault on-chain (record beneficiary acceptance).
+     * The contract now tracks per-beneficiary acceptance and enforces the threshold.
      * @param {string} beneficiaryAddress - Verified beneficiary address (recovered from authSig by caller)
      */
     async executeVault(beneficiaryAddress, vaultId) {
@@ -345,17 +344,52 @@ class AvalancheManager {
                 throw new Error("Unauthorized: Mnemonic does not belong to a beneficiary of this vault");
             }
 
+            // Check if this beneficiary has already accepted
+            const alreadyExecuted = await this.contract.executedBeneficiaries(vaultId, beneficiaryAddress);
+            if (alreadyExecuted) {
+                throw new Error("This beneficiary has already accepted this vault");
+            }
+
             // Use the relayer to execute (saves beneficiary from needing gas)
-            const tx = await this.contract.executeVault(vaultId);
+            // Pass the beneficiary address explicitly so the contract can track it
+            const tx = await this.contract.executeVault(vaultId, beneficiaryAddress);
             const receipt = await tx.wait();
+
+            // Read the updated execution status from the event
+            const event = receipt.logs
+                .map(log => { try { return this.contract.interface.parseLog(log); } catch { return null; } })
+                .find(e => e && e.name === 'VaultExecuted');
+
+            const executedCount = event ? Number(event.args.executedCount) : null;
+            const threshold = event ? Number(event.args.threshold) : null;
 
             return {
                 transactionHash: tx.hash,
                 blockNumber: receipt.blockNumber,
-                vaultId: vaultId
+                vaultId: vaultId,
+                executedCount,
+                threshold,
+                fullyExecuted: executedCount !== null && executedCount >= threshold,
             };
         } catch (error) {
             console.error('❌ Error in executeVault:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get the current execution status (how many beneficiaries have accepted vs threshold)
+     * @param {string} vaultId
+     */
+    async getExecutionStatus(vaultId) {
+        try {
+            const [executedCount, threshold] = await this.contract.getExecutionStatus(vaultId);
+            return {
+                executedCount: Number(executedCount),
+                threshold: Number(threshold),
+            };
+        } catch (error) {
+            console.error('❌ Error getting execution status:', error);
             throw error;
         }
     }
