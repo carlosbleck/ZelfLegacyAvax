@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node server-relayer.js",
+    "start:legacy": "node server.js",
     "test": "jest --no-watchman",
     "test:watch": "jest --watch"
   },
