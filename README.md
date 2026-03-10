@@ -174,8 +174,4 @@ npm start
 
 Use this address for `VAULT_REGISTRY_ADDRESS` in your backend `.env` when connecting to Fuji.
 
----
 
-## 📝 License
-
-This project is licensed under the ISC License.
